@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.deps import get_session
 from api.clients import router as clients_router
 from api.monitoring import router as monitoring_router
+from api.strategy import router as strategy_router
 from config import get_settings
 
 logger = structlog.get_logger()
@@ -41,6 +42,7 @@ app = FastAPI(
 # Include routers
 app.include_router(clients_router, prefix="/api/clients", tags=["clients"])
 app.include_router(monitoring_router, prefix="/api/monitoring", tags=["monitoring"])
+app.include_router(strategy_router, prefix="/api/strategy", tags=["strategy"])
 
 
 @app.get("/")
