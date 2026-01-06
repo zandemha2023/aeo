@@ -1,15 +1,14 @@
 """
 API middleware for rate limiting, logging, and request tracking.
+
+Rate limiting uses Redis for distributed tracking across multiple instances.
 """
 
 import time
-from collections import defaultdict
-from datetime import datetime, timedelta
 from typing import Callable
-from uuid import UUID
 
 import structlog
-from fastapi import Request, Response, HTTPException
+from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -18,76 +17,99 @@ from config import get_settings
 logger = structlog.get_logger()
 
 
-class RateLimitStore:
+class RedisRateLimiter:
     """
-    In-memory rate limit tracking.
+    Redis-backed sliding window rate limiter.
 
-    For production, replace with Redis for distributed rate limiting.
+    Uses Redis sorted sets for accurate distributed rate limiting.
     """
 
     def __init__(self):
-        self._requests: dict[str, list[float]] = defaultdict(list)
-        self._cleanup_interval = 60  # seconds
-        self._last_cleanup = time.time()
+        self._redis = None
+        self._window_seconds = 60
 
-    def _cleanup(self) -> None:
-        """Remove old request timestamps."""
-        now = time.time()
-        if now - self._last_cleanup < self._cleanup_interval:
-            return
+    async def _get_redis(self):
+        """Lazy Redis connection."""
+        if self._redis is None:
+            from redis.asyncio import Redis
+            settings = get_settings()
+            self._redis = Redis.from_url(settings.redis_url, decode_responses=True)
+        return self._redis
 
-        cutoff = now - 60  # Keep last minute
-        for key in list(self._requests.keys()):
-            self._requests[key] = [
-                ts for ts in self._requests[key] if ts > cutoff
-            ]
-            if not self._requests[key]:
-                del self._requests[key]
-
-        self._last_cleanup = now
-
-    def check_rate_limit(self, key: str, limit: int) -> tuple[bool, int]:
+    async def check_rate_limit(self, key: str, limit: int) -> tuple[bool, int]:
         """
-        Check if request is within rate limit.
+        Check if request is within rate limit using sliding window.
 
         Returns:
             Tuple of (allowed, remaining_requests)
         """
-        self._cleanup()
+        try:
+            redis = await self._get_redis()
+            now = time.time()
+            window_start = now - self._window_seconds
 
-        now = time.time()
-        minute_ago = now - 60
+            pipe = redis.pipeline()
 
-        # Get requests in the last minute
-        recent = [ts for ts in self._requests[key] if ts > minute_ago]
-        self._requests[key] = recent
+            # Remove old entries outside the window
+            pipe.zremrangebyscore(key, 0, window_start)
 
-        if len(recent) >= limit:
-            return False, 0
+            # Count current requests in window
+            pipe.zcard(key)
 
-        # Record this request
-        self._requests[key].append(now)
-        return True, limit - len(recent) - 1
+            # Add current request
+            pipe.zadd(key, {str(now): now})
 
-    def get_retry_after(self, key: str) -> int:
-        """Get seconds until rate limit resets."""
-        if key not in self._requests or not self._requests[key]:
-            return 0
+            # Set expiry on the key
+            pipe.expire(key, self._window_seconds + 1)
 
-        oldest = min(self._requests[key])
-        return max(0, int(60 - (time.time() - oldest)))
+            results = await pipe.execute()
+            current_count = results[1]  # zcard result
+
+            if current_count >= limit:
+                # Remove the request we just added since we're rejecting
+                await redis.zrem(key, str(now))
+                return False, 0
+
+            remaining = limit - current_count - 1
+            return True, max(0, remaining)
+
+        except Exception as e:
+            # If Redis fails, allow the request but log the error
+            logger.error("rate_limit_redis_error", error=str(e))
+            return True, limit
+
+    async def get_retry_after(self, key: str) -> int:
+        """Get seconds until oldest request expires from window."""
+        try:
+            redis = await self._get_redis()
+            oldest = await redis.zrange(key, 0, 0, withscores=True)
+
+            if not oldest:
+                return 0
+
+            oldest_time = oldest[0][1]
+            retry_after = int(self._window_seconds - (time.time() - oldest_time))
+            return max(0, retry_after)
+
+        except Exception:
+            return 60  # Default retry
+
+    async def close(self):
+        """Close Redis connection."""
+        if self._redis:
+            await self._redis.close()
 
 
-# Global rate limit store
-_rate_limit_store = RateLimitStore()
+# Global rate limiter instance
+_rate_limiter = RedisRateLimiter()
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """
     Rate limiting middleware based on organization.
 
-    Uses the organization's rate_limit_rpm setting from the database.
-    Falls back to default limit for unauthenticated requests.
+    Uses Redis for distributed rate limiting across multiple instances.
+    Falls back to allowing requests if Redis is unavailable.
     """
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
@@ -96,28 +118,27 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if not settings.rate_limit_enabled:
             return await call_next(request)
 
-        # Skip rate limiting for health checks
-        if request.url.path in ["/", "/health", "/ready"]:
+        # Skip rate limiting for health checks and metrics
+        if request.url.path in ["/", "/health", "/ready", "/metrics"]:
             return await call_next(request)
 
         # Get rate limit key and limit
-        # The auth middleware should have set these
         org_id = getattr(request.state, "organization_id", None)
         rate_limit = getattr(request.state, "rate_limit_rpm", settings.default_rate_limit_rpm)
 
         if org_id:
-            key = f"org:{org_id}"
+            key = f"ratelimit:org:{org_id}"
         else:
             # Fall back to IP-based limiting for unauthenticated requests
             client_ip = request.client.host if request.client else "unknown"
-            key = f"ip:{client_ip}"
+            key = f"ratelimit:ip:{client_ip}"
             rate_limit = settings.default_rate_limit_rpm
 
         # Check rate limit
-        allowed, remaining = _rate_limit_store.check_rate_limit(key, rate_limit)
+        allowed, remaining = await _rate_limiter.check_rate_limit(key, rate_limit)
 
         if not allowed:
-            retry_after = _rate_limit_store.get_retry_after(key)
+            retry_after = await _rate_limiter.get_retry_after(key)
             logger.warning(
                 "rate_limit_exceeded",
                 key=key,
