@@ -23,6 +23,7 @@ logger = structlog.get_logger()
 class AnalyticsState(TypedDict):
     """State for the analytics workflow."""
 
+    organization_id: str
     client_id: str
     client_name: str
     domain: str
@@ -58,13 +59,17 @@ class AnalyticsWorkflow:
     5. Store results
     """
 
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession, organization_id: UUID):
         self.session = session
+        self.organization_id = organization_id
         self.analyst = AnalystAgent()
         self.builder = BuilderAgent()
         self.engineer = EngineerAgent()
         self.reporter = ReporterAgent()
-        self._log = logger.bind(workflow="analytics")
+        self._log = logger.bind(
+            workflow="analytics",
+            organization_id=str(organization_id),
+        )
 
     def build_graph(self, include_technical: bool = False) -> StateGraph:
         """Build the LangGraph workflow."""
@@ -105,6 +110,7 @@ class AnalyticsWorkflow:
         # Load performance reports
         perf_intel = await get_latest_intelligence(
             self.session,
+            self.organization_id,
             client_id,
             "performance_report",
         )
@@ -114,6 +120,7 @@ class AnalyticsWorkflow:
         # Load mentions
         mentions_intel = await get_latest_intelligence(
             self.session,
+            self.organization_id,
             client_id,
             "brand_mentions",
         )
@@ -123,6 +130,7 @@ class AnalyticsWorkflow:
         # Load competitor data
         competitor_intel = await get_latest_intelligence(
             self.session,
+            self.organization_id,
             client_id,
             "competitive_intelligence",
         )
@@ -246,6 +254,7 @@ class AnalyticsWorkflow:
         if state.get("performance_analysis"):
             await store_intelligence(
                 self.session,
+                self.organization_id,
                 client_id,
                 "performance_analysis",
                 state["performance_analysis"],
@@ -255,6 +264,7 @@ class AnalyticsWorkflow:
         if state.get("technical_audit"):
             await store_intelligence(
                 self.session,
+                self.organization_id,
                 client_id,
                 "technical_audit",
                 state["technical_audit"],
@@ -264,6 +274,7 @@ class AnalyticsWorkflow:
         if state.get("schema_audit"):
             await store_intelligence(
                 self.session,
+                self.organization_id,
                 client_id,
                 "schema_audit",
                 state["schema_audit"],
@@ -273,6 +284,7 @@ class AnalyticsWorkflow:
         if state.get("client_report"):
             await store_intelligence(
                 self.session,
+                self.organization_id,
                 client_id,
                 f"client_report_{state['report_type']}",
                 state["client_report"],
@@ -285,6 +297,7 @@ class AnalyticsWorkflow:
 class TechnicalAuditState(TypedDict):
     """State for standalone technical audit workflow."""
 
+    organization_id: str
     client_id: str
     domain: str
     robots_txt: str | None
@@ -312,11 +325,15 @@ class TechnicalAuditWorkflow:
     4. Store results
     """
 
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession, organization_id: UUID):
         self.session = session
+        self.organization_id = organization_id
         self.builder = BuilderAgent()
         self.engineer = EngineerAgent()
-        self._log = logger.bind(workflow="technical_audit")
+        self._log = logger.bind(
+            workflow="technical_audit",
+            organization_id=str(organization_id),
+        )
 
     def build_graph(self) -> StateGraph:
         """Build the LangGraph workflow."""
@@ -415,6 +432,7 @@ class TechnicalAuditWorkflow:
 
         await store_intelligence(
             self.session,
+            self.organization_id,
             client_id,
             "full_technical_audit",
             {
@@ -431,6 +449,7 @@ class TechnicalAuditWorkflow:
 
 async def run_analytics_workflow(
     session: AsyncSession,
+    organization_id: UUID,
     client_id: UUID,
     client_name: str,
     domain: str,
@@ -442,6 +461,7 @@ async def run_analytics_workflow(
 
     Args:
         session: Database session
+        organization_id: Organization UUID (tenant)
         client_id: Client UUID
         client_name: Client name
         domain: Client domain
@@ -453,14 +473,16 @@ async def run_analytics_workflow(
     """
     logger.info(
         "starting_analytics_workflow",
+        organization_id=str(organization_id),
         client_id=str(client_id),
         report_type=report_type,
     )
 
-    workflow = AnalyticsWorkflow(session)
+    workflow = AnalyticsWorkflow(session, organization_id)
     graph = workflow.build_graph(include_technical=include_technical)
 
     initial_state: AnalyticsState = {
+        "organization_id": str(organization_id),
         "client_id": str(client_id),
         "client_name": client_name,
         "domain": domain,
@@ -489,6 +511,7 @@ async def run_analytics_workflow(
 
 async def run_technical_audit_workflow(
     session: AsyncSession,
+    organization_id: UUID,
     client_id: UUID,
     domain: str,
     robots_txt: str | None = None,
@@ -500,6 +523,7 @@ async def run_technical_audit_workflow(
 
     Args:
         session: Database session
+        organization_id: Organization UUID (tenant)
         client_id: Client UUID
         domain: Domain to audit
         robots_txt: robots.txt content if available
@@ -509,12 +533,17 @@ async def run_technical_audit_workflow(
     Returns:
         Final workflow state
     """
-    logger.info("starting_technical_audit_workflow", domain=domain)
+    logger.info(
+        "starting_technical_audit_workflow",
+        organization_id=str(organization_id),
+        domain=domain,
+    )
 
-    workflow = TechnicalAuditWorkflow(session)
+    workflow = TechnicalAuditWorkflow(session, organization_id)
     graph = workflow.build_graph()
 
     initial_state: TechnicalAuditState = {
+        "organization_id": str(organization_id),
         "client_id": str(client_id),
         "domain": domain,
         "robots_txt": robots_txt,

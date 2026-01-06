@@ -22,6 +22,7 @@ logger = structlog.get_logger()
 class OnboardingState(TypedDict):
     """State for the onboarding workflow."""
 
+    organization_id: str
     domain: str
     company_name: str
     additional_context: str
@@ -43,10 +44,14 @@ class OnboardingWorkflow:
     4. Store results
     """
 
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession, organization_id: UUID):
         self.session = session
+        self.organization_id = organization_id
         self.cartographer = CartographerAgent()
-        self._log = logger.bind(workflow="onboarding")
+        self._log = logger.bind(
+            workflow="onboarding",
+            organization_id=str(organization_id),
+        )
 
     def build_graph(self) -> StateGraph:
         """Build the LangGraph workflow."""
@@ -72,7 +77,9 @@ class OnboardingWorkflow:
         self._log.info("creating_client", domain=state["domain"])
 
         # Check if client already exists
-        existing = await get_client_by_domain(self.session, state["domain"])
+        existing = await get_client_by_domain(
+            self.session, self.organization_id, state["domain"]
+        )
 
         if existing:
             self._log.info("client_exists", client_id=str(existing.id))
@@ -80,6 +87,7 @@ class OnboardingWorkflow:
         else:
             client = await create_client(
                 self.session,
+                self.organization_id,
                 state["company_name"],
                 state["domain"],
             )
@@ -104,7 +112,7 @@ class OnboardingWorkflow:
 
             # Store in knowledge base
             client_id = UUID(state["client_id"])
-            kb = ClientKnowledgeBase(self.session, client_id)
+            kb = ClientKnowledgeBase(self.session, self.organization_id, client_id)
             await kb.store_client_profile(profile)
 
             self._log.info(
@@ -165,6 +173,7 @@ class OnboardingWorkflow:
             try:
                 await create_monitoring_query(
                     self.session,
+                    self.organization_id,
                     client_id,
                     query_text,
                     query_type,
@@ -198,6 +207,7 @@ class OnboardingWorkflow:
 
 async def run_onboarding_workflow(
     session: AsyncSession,
+    organization_id: UUID,
     domain: str,
     company_name: str,
     additional_context: str = "",
@@ -207,6 +217,7 @@ async def run_onboarding_workflow(
 
     Args:
         session: Database session
+        organization_id: Organization UUID (tenant)
         domain: Client website domain
         company_name: Client company name
         additional_context: Optional additional context
@@ -214,12 +225,17 @@ async def run_onboarding_workflow(
     Returns:
         Final workflow state with results
     """
-    logger.info("starting_onboarding_workflow", domain=domain)
+    logger.info(
+        "starting_onboarding_workflow",
+        organization_id=str(organization_id),
+        domain=domain,
+    )
 
-    workflow = OnboardingWorkflow(session)
+    workflow = OnboardingWorkflow(session, organization_id)
     graph = workflow.build_graph()
 
     initial_state: OnboardingState = {
+        "organization_id": str(organization_id),
         "domain": domain,
         "company_name": company_name,
         "additional_context": additional_context,

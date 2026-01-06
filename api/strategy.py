@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.auth import Auth, CurrentOrg
 from api.deps import get_session
 from db.queries import get_client, get_latest_intelligence
 from knowledge.client_kb import ClientKnowledgeBase
@@ -48,6 +49,7 @@ class ExecutionPlanResponse(BaseModel):
 @router.post("/{client_id}/generate", response_model=StrategyRunResponse)
 async def generate_strategy(
     client_id: UUID,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """
@@ -58,13 +60,17 @@ async def generate_strategy(
     2. Synthesizes strategy (Strategist)
     3. Creates execution plans (Architect)
     """
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    logger.info("generating_strategy", client_id=str(client_id))
+    logger.info(
+        "generating_strategy",
+        client_id=str(client_id),
+        organization_id=str(auth.organization_id),
+    )
 
-    result = await run_strategy_workflow(session, client_id)
+    result = await run_strategy_workflow(session, auth.organization_id, client_id)
 
     return StrategyRunResponse(
         client_id=str(client_id),
@@ -78,14 +84,17 @@ async def generate_strategy(
 @router.get("/{client_id}", response_model=StrategySummaryResponse)
 async def get_strategy(
     client_id: UUID,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Get the current strategy for a client."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    strategy_intel = await get_latest_intelligence(session, client_id, "strategist")
+    strategy_intel = await get_latest_intelligence(
+        session, auth.organization_id, client_id, "strategist"
+    )
     if not strategy_intel:
         raise HTTPException(
             status_code=404,
@@ -108,14 +117,17 @@ async def get_strategy(
 @router.get("/{client_id}/full")
 async def get_full_strategy(
     client_id: UUID,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Get the complete strategy details."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    strategy_intel = await get_latest_intelligence(session, client_id, "strategist")
+    strategy_intel = await get_latest_intelligence(
+        session, auth.organization_id, client_id, "strategist"
+    )
     if not strategy_intel:
         raise HTTPException(
             status_code=404,
@@ -128,14 +140,17 @@ async def get_full_strategy(
 @router.get("/{client_id}/execution-plans", response_model=list[ExecutionPlanResponse])
 async def get_execution_plans(
     client_id: UUID,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Get execution plans for a client."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    architect_intel = await get_latest_intelligence(session, client_id, "architect")
+    architect_intel = await get_latest_intelligence(
+        session, auth.organization_id, client_id, "architect"
+    )
     if not architect_intel:
         raise HTTPException(
             status_code=404,
@@ -156,14 +171,17 @@ async def get_execution_plans(
 @router.get("/{client_id}/content-calendar")
 async def get_content_calendar(
     client_id: UUID,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Get content calendar derived from execution plans."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    architect_intel = await get_latest_intelligence(session, client_id, "architect")
+    architect_intel = await get_latest_intelligence(
+        session, auth.organization_id, client_id, "architect"
+    )
     if not architect_intel:
         raise HTTPException(
             status_code=404,
@@ -192,14 +210,15 @@ async def get_content_calendar(
 @router.get("/{client_id}/intelligence")
 async def get_all_intelligence(
     client_id: UUID,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Get all intelligence gathered for a client."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    kb = ClientKnowledgeBase(session, client_id)
+    kb = ClientKnowledgeBase(session, auth.organization_id, client_id)
     context = await kb.get_full_context()
 
     return context
@@ -208,14 +227,15 @@ async def get_all_intelligence(
 @router.get("/{client_id}/competitive")
 async def get_competitive_intelligence(
     client_id: UUID,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Get competitive intelligence for a client."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    kb = ClientKnowledgeBase(session, client_id)
+    kb = ClientKnowledgeBase(session, auth.organization_id, client_id)
     competitive = await kb.get_competitive_intelligence()
 
     if not competitive:
@@ -230,14 +250,15 @@ async def get_competitive_intelligence(
 @router.get("/{client_id}/content-analysis")
 async def get_content_analysis(
     client_id: UUID,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Get content analysis for a client."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    kb = ClientKnowledgeBase(session, client_id)
+    kb = ClientKnowledgeBase(session, auth.organization_id, client_id)
     content = await kb.get_content_analysis()
 
     if not content:

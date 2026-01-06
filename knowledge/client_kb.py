@@ -41,15 +41,20 @@ class ClientKnowledgeBase:
     - Monitoring queries
     """
 
-    def __init__(self, session: AsyncSession, client_id: UUID):
+    def __init__(self, session: AsyncSession, organization_id: UUID, client_id: UUID):
         self.session = session
+        self.organization_id = organization_id
         self.client_id = client_id
-        self._log = logger.bind(client_id=str(client_id))
+        self._log = logger.bind(
+            organization_id=str(organization_id),
+            client_id=str(client_id),
+        )
 
     async def get_client_profile(self) -> ClientIntelligenceProfile | None:
         """Get the latest client intelligence profile."""
         intel = await get_latest_intelligence(
             self.session,
+            self.organization_id,
             self.client_id,
             "cartographer",
         )
@@ -61,6 +66,7 @@ class ClientKnowledgeBase:
         """Store/update client intelligence profile."""
         await store_intelligence(
             self.session,
+            self.organization_id,
             self.client_id,
             "cartographer",
             profile.model_dump(mode="json"),
@@ -71,6 +77,7 @@ class ClientKnowledgeBase:
         """Get the latest competitive intelligence."""
         intel = await get_latest_intelligence(
             self.session,
+            self.organization_id,
             self.client_id,
             "scout",
         )
@@ -84,6 +91,7 @@ class ClientKnowledgeBase:
         """Store/update competitive intelligence."""
         await store_intelligence(
             self.session,
+            self.organization_id,
             self.client_id,
             "scout",
             intelligence.model_dump(mode="json"),
@@ -94,6 +102,7 @@ class ClientKnowledgeBase:
         """Get the latest content analysis."""
         intel = await get_latest_intelligence(
             self.session,
+            self.organization_id,
             self.client_id,
             "librarian",
         )
@@ -105,6 +114,7 @@ class ClientKnowledgeBase:
         """Store/update content analysis."""
         await store_intelligence(
             self.session,
+            self.organization_id,
             self.client_id,
             "librarian",
             analysis.model_dump(mode="json"),
@@ -115,6 +125,7 @@ class ClientKnowledgeBase:
         """Get the latest performance report."""
         intel = await get_latest_intelligence(
             self.session,
+            self.organization_id,
             self.client_id,
             "auditor",
         )
@@ -126,6 +137,7 @@ class ClientKnowledgeBase:
         """Store/update performance report."""
         await store_intelligence(
             self.session,
+            self.organization_id,
             self.client_id,
             "auditor",
             report.model_dump(mode="json"),
@@ -134,7 +146,9 @@ class ClientKnowledgeBase:
 
     async def get_monitoring_queries(self) -> list[AIQuery]:
         """Get active monitoring queries for this client."""
-        queries = await get_monitoring_queries(self.session, self.client_id)
+        queries = await get_monitoring_queries(
+            self.session, self.organization_id, self.client_id
+        )
 
         # Get client profile to add brand names
         profile = await self.get_client_profile()
@@ -167,6 +181,7 @@ class ClientKnowledgeBase:
         """Get recent brand mentions from monitoring."""
         results = await get_recent_monitoring_results(
             self.session,
+            self.organization_id,
             self.client_id,
             hours=hours,
         )
@@ -195,7 +210,7 @@ class ClientKnowledgeBase:
         content = await self.get_content_analysis()
         performance = await self.get_performance_report()
 
-        client = await get_client(self.session, self.client_id)
+        client = await get_client(self.session, self.organization_id, self.client_id)
 
         return {
             "client": {

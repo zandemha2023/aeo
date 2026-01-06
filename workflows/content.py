@@ -29,6 +29,7 @@ logger = structlog.get_logger()
 class ContentState(TypedDict):
     """State for the content workflow."""
 
+    organization_id: str
     client_id: str
     blueprints: list[dict]
     client_profile: ClientIntelligenceProfile | None
@@ -55,10 +56,14 @@ class ContentWorkflow:
     4. Store approved content
     """
 
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession, organization_id: UUID):
         self.session = session
+        self.organization_id = organization_id
         self.writer = WriterAgent()
-        self._log = logger.bind(workflow="content")
+        self._log = logger.bind(
+            workflow="content",
+            organization_id=str(organization_id),
+        )
 
     def build_graph(self) -> StateGraph:
         """Build the LangGraph workflow."""
@@ -84,7 +89,7 @@ class ContentWorkflow:
         self._log.info("loading_context", client_id=state["client_id"])
 
         client_id = UUID(state["client_id"])
-        kb = ClientKnowledgeBase(self.session, client_id)
+        kb = ClientKnowledgeBase(self.session, self.organization_id, client_id)
 
         # Load client profile
         profile = await kb.get_client_profile()
@@ -94,6 +99,7 @@ class ContentWorkflow:
         if not state["blueprints"]:
             architect_intel = await get_latest_intelligence(
                 self.session,
+                self.organization_id,
                 client_id,
                 "architect",
             )
@@ -236,6 +242,7 @@ class ContentWorkflow:
         # Store in database
         await store_intelligence(
             self.session,
+            self.organization_id,
             client_id,
             "content_generated",
             {
@@ -268,6 +275,7 @@ class ContentWorkflow:
 class OptimizationState(TypedDict):
     """State for the optimization workflow."""
 
+    organization_id: str
     client_id: str
     content_items: list[dict]  # url, title, content, score
 
@@ -291,10 +299,14 @@ class OptimizationWorkflow:
     4. Store results
     """
 
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession, organization_id: UUID):
         self.session = session
+        self.organization_id = organization_id
         self.optimizer = OptimizerAgent()
-        self._log = logger.bind(workflow="optimization")
+        self._log = logger.bind(
+            workflow="optimization",
+            organization_id=str(organization_id),
+        )
 
     def build_graph(self) -> StateGraph:
         """Build the LangGraph workflow."""
@@ -372,6 +384,7 @@ class OptimizationWorkflow:
 
         await store_intelligence(
             self.session,
+            self.organization_id,
             client_id,
             "content_optimizations",
             {
@@ -386,6 +399,7 @@ class OptimizationWorkflow:
 
 async def run_content_workflow(
     session: AsyncSession,
+    organization_id: UUID,
     client_id: UUID,
     blueprints: list[dict] | None = None,
 ) -> ContentState:
@@ -394,18 +408,24 @@ async def run_content_workflow(
 
     Args:
         session: Database session
+        organization_id: Organization UUID (tenant)
         client_id: Client UUID
         blueprints: Optional list of content blueprints (loaded from architect if not provided)
 
     Returns:
         Final workflow state
     """
-    logger.info("starting_content_workflow", client_id=str(client_id))
+    logger.info(
+        "starting_content_workflow",
+        organization_id=str(organization_id),
+        client_id=str(client_id),
+    )
 
-    workflow = ContentWorkflow(session)
+    workflow = ContentWorkflow(session, organization_id)
     graph = workflow.build_graph()
 
     initial_state: ContentState = {
+        "organization_id": str(organization_id),
         "client_id": str(client_id),
         "blueprints": blueprints or [],
         "client_profile": None,
@@ -434,6 +454,7 @@ async def run_content_workflow(
 
 async def run_optimization_workflow(
     session: AsyncSession,
+    organization_id: UUID,
     client_id: UUID,
     content_items: list[dict],
 ) -> OptimizationState:
@@ -442,18 +463,24 @@ async def run_optimization_workflow(
 
     Args:
         session: Database session
+        organization_id: Organization UUID (tenant)
         client_id: Client UUID
         content_items: List of content items to optimize
 
     Returns:
         Final workflow state
     """
-    logger.info("starting_optimization_workflow", client_id=str(client_id))
+    logger.info(
+        "starting_optimization_workflow",
+        organization_id=str(organization_id),
+        client_id=str(client_id),
+    )
 
-    workflow = OptimizationWorkflow(session)
+    workflow = OptimizationWorkflow(session, organization_id)
     graph = workflow.build_graph()
 
     initial_state: OptimizationState = {
+        "organization_id": str(organization_id),
         "client_id": str(client_id),
         "content_items": content_items,
         "optimizations": [],

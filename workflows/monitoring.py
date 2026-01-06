@@ -38,6 +38,7 @@ logger = structlog.get_logger()
 class MonitoringState(TypedDict):
     """State for the monitoring workflow."""
 
+    organization_id: str
     client_id: str
     queries: list[AIQuery]
     responses: list[AIResponse]
@@ -60,10 +61,14 @@ class MonitoringWorkflow:
     5. Store results and create alerts
     """
 
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession, organization_id: UUID):
         self.session = session
+        self.organization_id = organization_id
         self.auditor = AuditorAgent()
-        self._log = logger.bind(workflow="monitoring")
+        self._log = logger.bind(
+            workflow="monitoring",
+            organization_id=str(organization_id),
+        )
 
     def build_graph(self) -> StateGraph:
         """Build the LangGraph workflow."""
@@ -93,7 +98,7 @@ class MonitoringWorkflow:
         self._log.info("loading_queries", client_id=state["client_id"])
 
         client_id = UUID(state["client_id"])
-        kb = ClientKnowledgeBase(self.session, client_id)
+        kb = ClientKnowledgeBase(self.session, self.organization_id, client_id)
 
         queries = await kb.get_monitoring_queries()
 
@@ -167,11 +172,11 @@ class MonitoringWorkflow:
         self._log.info("analyzing_performance")
 
         client_id = UUID(state["client_id"])
-        client = await get_client(self.session, client_id)
+        client = await get_client(self.session, self.organization_id, client_id)
         industry = client.industry if client else ""
 
         # Get previous metrics for trend analysis
-        kb = ClientKnowledgeBase(self.session, client_id)
+        kb = ClientKnowledgeBase(self.session, self.organization_id, client_id)
         previous_report = await kb.get_performance_report()
         previous_metrics = previous_report.metrics if previous_report else None
 
@@ -197,7 +202,7 @@ class MonitoringWorkflow:
         self._log.info("storing_results")
 
         client_id = UUID(state["client_id"])
-        kb = ClientKnowledgeBase(self.session, client_id)
+        kb = ClientKnowledgeBase(self.session, self.organization_id, client_id)
 
         # Store the performance report
         if state["report"]:
@@ -206,13 +211,16 @@ class MonitoringWorkflow:
             # Also store a snapshot for historical tracking
             await store_performance_snapshot(
                 self.session,
+                self.organization_id,
                 client_id,
                 state["report"].metrics.model_dump(),
                 {"timestamp": datetime.utcnow().isoformat()},
             )
 
         # Store individual mention results
-        queries = await get_monitoring_queries(self.session, client_id)
+        queries = await get_monitoring_queries(
+            self.session, self.organization_id, client_id
+        )
         query_map = {q.query: q.id for q in queries}
 
         for mention in state["mentions"]:
@@ -220,6 +228,7 @@ class MonitoringWorkflow:
             if query_id:
                 await store_monitoring_result(
                     self.session,
+                    self.organization_id,
                     client_id,
                     query_id,
                     mention.engine,
@@ -250,6 +259,7 @@ class MonitoringWorkflow:
                 if issue.severity in [Severity.CRITICAL, Severity.WARNING]:
                     alert = await create_alert(
                         self.session,
+                        self.organization_id,
                         client_id,
                         issue.severity.value,
                         "performance_issue",
@@ -275,6 +285,7 @@ class MonitoringWorkflow:
 
 async def run_monitoring_workflow(
     session: AsyncSession,
+    organization_id: UUID,
     client_id: UUID,
 ) -> MonitoringState:
     """
@@ -282,17 +293,23 @@ async def run_monitoring_workflow(
 
     Args:
         session: Database session
+        organization_id: Organization UUID (tenant)
         client_id: Client UUID
 
     Returns:
         Final workflow state with results
     """
-    logger.info("starting_monitoring_workflow", client_id=str(client_id))
+    logger.info(
+        "starting_monitoring_workflow",
+        organization_id=str(organization_id),
+        client_id=str(client_id),
+    )
 
-    workflow = MonitoringWorkflow(session)
+    workflow = MonitoringWorkflow(session, organization_id)
     graph = workflow.build_graph()
 
     initial_state: MonitoringState = {
+        "organization_id": str(organization_id),
         "client_id": str(client_id),
         "queries": [],
         "responses": [],

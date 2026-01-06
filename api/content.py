@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.auth import Auth, CurrentOrg
 from api.deps import get_session
 from db.queries import get_client, get_latest_intelligence
 from workflows.content import run_content_workflow, run_optimization_workflow
@@ -61,6 +62,7 @@ class QualityReportResponse(BaseModel):
 async def generate_content(
     client_id: UUID,
     request: ContentGenerateRequest,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """
@@ -69,14 +71,19 @@ async def generate_content(
     If blueprints are not provided, uses the latest execution plans from The Architect.
     Runs quality gates on all generated content.
     """
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    logger.info("generating_content", client_id=str(client_id))
+    logger.info(
+        "generating_content",
+        client_id=str(client_id),
+        organization_id=str(auth.organization_id),
+    )
 
     result = await run_content_workflow(
         session,
+        auth.organization_id,
         client_id,
         blueprints=request.blueprints,
     )
@@ -99,6 +106,7 @@ async def generate_content(
 async def optimize_content(
     client_id: UUID,
     request: ContentOptimizeRequest,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """
@@ -106,7 +114,7 @@ async def optimize_content(
 
     Provide a list of content items with their current text and citability score.
     """
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
@@ -116,11 +124,13 @@ async def optimize_content(
     logger.info(
         "optimizing_content",
         client_id=str(client_id),
+        organization_id=str(auth.organization_id),
         items=len(request.content_items),
     )
 
     result = await run_optimization_workflow(
         session,
+        auth.organization_id,
         client_id,
         content_items=request.content_items,
     )
@@ -143,14 +153,17 @@ async def optimize_content(
 @router.get("/{client_id}/generated")
 async def get_generated_content(
     client_id: UUID,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Get all generated content for a client."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    content_intel = await get_latest_intelligence(session, client_id, "content_generated")
+    content_intel = await get_latest_intelligence(
+        session, auth.organization_id, client_id, "content_generated"
+    )
     if not content_intel:
         raise HTTPException(
             status_code=404,
@@ -163,14 +176,17 @@ async def get_generated_content(
 @router.get("/{client_id}/generated/approved")
 async def get_approved_content(
     client_id: UUID,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Get approved content that passed quality gates."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    content_intel = await get_latest_intelligence(session, client_id, "content_generated")
+    content_intel = await get_latest_intelligence(
+        session, auth.organization_id, client_id, "content_generated"
+    )
     if not content_intel:
         raise HTTPException(
             status_code=404,
@@ -184,14 +200,17 @@ async def get_approved_content(
 async def get_generated_content_by_index(
     client_id: UUID,
     index: int,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Get a specific generated content piece by index."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    content_intel = await get_latest_intelligence(session, client_id, "content_generated")
+    content_intel = await get_latest_intelligence(
+        session, auth.organization_id, client_id, "content_generated"
+    )
     if not content_intel:
         raise HTTPException(
             status_code=404,
@@ -209,14 +228,17 @@ async def get_generated_content_by_index(
 async def get_content_as_markdown(
     client_id: UUID,
     index: int,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Get a specific generated content piece as markdown."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    content_intel = await get_latest_intelligence(session, client_id, "content_generated")
+    content_intel = await get_latest_intelligence(
+        session, auth.organization_id, client_id, "content_generated"
+    )
     if not content_intel:
         raise HTTPException(
             status_code=404,
@@ -244,14 +266,17 @@ async def get_content_as_markdown(
 @router.get("/{client_id}/quality-reports", response_model=list[QualityReportResponse])
 async def get_quality_reports(
     client_id: UUID,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Get quality reports for generated content."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    content_intel = await get_latest_intelligence(session, client_id, "content_generated")
+    content_intel = await get_latest_intelligence(
+        session, auth.organization_id, client_id, "content_generated"
+    )
     if not content_intel:
         raise HTTPException(
             status_code=404,
@@ -276,14 +301,17 @@ async def get_quality_reports(
 @router.get("/{client_id}/optimizations")
 async def get_optimizations(
     client_id: UUID,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Get optimization results for a client."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    opt_intel = await get_latest_intelligence(session, client_id, "content_optimizations")
+    opt_intel = await get_latest_intelligence(
+        session, auth.organization_id, client_id, "content_optimizations"
+    )
     if not opt_intel:
         raise HTTPException(
             status_code=404,
@@ -297,14 +325,17 @@ async def get_optimizations(
 async def get_optimization_by_index(
     client_id: UUID,
     index: int,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Get a specific optimization result."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    opt_intel = await get_latest_intelligence(session, client_id, "content_optimizations")
+    opt_intel = await get_latest_intelligence(
+        session, auth.organization_id, client_id, "content_optimizations"
+    )
     if not opt_intel:
         raise HTTPException(
             status_code=404,

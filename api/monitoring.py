@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.auth import Auth, CurrentOrg
 from api.deps import get_session
 from db.queries import (
     get_client,
@@ -68,6 +69,7 @@ class AlertResponse(BaseModel):
 @router.post("/{client_id}/run", response_model=MonitoringRunResponse)
 async def run_monitoring(
     client_id: UUID,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """
@@ -75,13 +77,17 @@ async def run_monitoring(
 
     Queries all AI engines and analyzes brand mentions.
     """
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    logger.info("running_monitoring", client_id=str(client_id))
+    logger.info(
+        "running_monitoring",
+        client_id=str(client_id),
+        organization_id=str(auth.organization_id),
+    )
 
-    result = await run_monitoring_workflow(session, client_id)
+    result = await run_monitoring_workflow(session, auth.organization_id, client_id)
 
     return MonitoringRunResponse(
         client_id=str(client_id),
@@ -96,14 +102,17 @@ async def run_monitoring(
 @router.get("/{client_id}/queries", response_model=list[QueryResponse])
 async def list_queries(
     client_id: UUID,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """List monitoring queries for a client."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    queries = await get_monitoring_queries(session, client_id, active_only=False)
+    queries = await get_monitoring_queries(
+        session, auth.organization_id, client_id, active_only=False
+    )
 
     return [
         QueryResponse(
@@ -121,15 +130,17 @@ async def list_queries(
 async def add_query(
     client_id: UUID,
     request: QueryCreate,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Add a new monitoring query."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
     query = await create_monitoring_query(
         session,
+        auth.organization_id,
         client_id,
         request.query,
         request.query_type,
@@ -148,14 +159,15 @@ async def add_query(
 @router.get("/{client_id}/report")
 async def get_performance_report(
     client_id: UUID,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Get the latest performance report for a client."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    kb = ClientKnowledgeBase(session, client_id)
+    kb = ClientKnowledgeBase(session, auth.organization_id, client_id)
     report = await kb.get_performance_report()
 
     if not report:
@@ -170,14 +182,15 @@ async def get_performance_report(
 @router.get("/{client_id}/alerts", response_model=list[AlertResponse])
 async def list_alerts(
     client_id: UUID,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """List active alerts for a client."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    alerts = await get_active_alerts(session, client_id)
+    alerts = await get_active_alerts(session, auth.organization_id, client_id)
 
     return [
         AlertResponse(
@@ -197,10 +210,16 @@ async def list_alerts(
 async def acknowledge_alert_endpoint(
     client_id: UUID,
     alert_id: UUID,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Acknowledge an alert."""
-    alert = await acknowledge_alert(session, alert_id)
+    # Verify client access first
+    client = await get_client(session, auth.organization_id, client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    alert = await acknowledge_alert(session, auth.organization_id, alert_id)
 
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
@@ -212,10 +231,16 @@ async def acknowledge_alert_endpoint(
 async def resolve_alert_endpoint(
     client_id: UUID,
     alert_id: UUID,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Resolve an alert."""
-    alert = await resolve_alert(session, alert_id)
+    # Verify client access first
+    client = await get_client(session, auth.organization_id, client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    alert = await resolve_alert(session, auth.organization_id, alert_id)
 
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")

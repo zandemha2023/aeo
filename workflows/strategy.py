@@ -33,6 +33,7 @@ logger = structlog.get_logger()
 class StrategyState(TypedDict):
     """State for the strategy workflow."""
 
+    organization_id: str
     client_id: str
     domain: str
     company_name: str
@@ -62,15 +63,19 @@ class StrategyWorkflow:
     3. Create execution plans (Architect)
     """
 
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession, organization_id: UUID):
         self.session = session
+        self.organization_id = organization_id
         self.cartographer = CartographerAgent()
         self.scout = ScoutAgent()
         self.librarian = LibrarianAgent()
         self.auditor = AuditorAgent()
         self.strategist = StrategistAgent()
         self.architect = ArchitectAgent()
-        self._log = logger.bind(workflow="strategy")
+        self._log = logger.bind(
+            workflow="strategy",
+            organization_id=str(organization_id),
+        )
 
     def build_graph(self) -> StateGraph:
         """Build the LangGraph workflow."""
@@ -101,7 +106,7 @@ class StrategyWorkflow:
 
         # Get existing data if available
         client_id = UUID(state["client_id"])
-        kb = ClientKnowledgeBase(self.session, client_id)
+        kb = ClientKnowledgeBase(self.session, self.organization_id, client_id)
 
         # Check for existing profile (may have been created during onboarding)
         existing_profile = await kb.get_client_profile()
@@ -287,6 +292,7 @@ class StrategyWorkflow:
         if state["client_profile"]:
             await store_intelligence(
                 self.session,
+                self.organization_id,
                 client_id,
                 "cartographer",
                 state["client_profile"].model_dump(mode="json"),
@@ -295,6 +301,7 @@ class StrategyWorkflow:
         if state["competitive_intel"]:
             await store_intelligence(
                 self.session,
+                self.organization_id,
                 client_id,
                 "scout",
                 state["competitive_intel"].model_dump(mode="json"),
@@ -303,6 +310,7 @@ class StrategyWorkflow:
         if state["content_analysis"]:
             await store_intelligence(
                 self.session,
+                self.organization_id,
                 client_id,
                 "librarian",
                 state["content_analysis"].model_dump(mode="json"),
@@ -311,6 +319,7 @@ class StrategyWorkflow:
         if state["performance_report"]:
             await store_intelligence(
                 self.session,
+                self.organization_id,
                 client_id,
                 "auditor",
                 state["performance_report"].model_dump(mode="json"),
@@ -320,6 +329,7 @@ class StrategyWorkflow:
         if state["strategy"]:
             await store_intelligence(
                 self.session,
+                self.organization_id,
                 client_id,
                 "strategist",
                 state["strategy"].to_dict(),
@@ -329,6 +339,7 @@ class StrategyWorkflow:
         if state["execution_plans"]:
             await store_intelligence(
                 self.session,
+                self.organization_id,
                 client_id,
                 "architect",
                 {"plans": [p.to_dict() for p in state["execution_plans"]]},
@@ -342,6 +353,7 @@ class StrategyWorkflow:
 
 async def run_strategy_workflow(
     session: AsyncSession,
+    organization_id: UUID,
     client_id: UUID,
 ) -> StrategyState:
     """
@@ -349,22 +361,28 @@ async def run_strategy_workflow(
 
     Args:
         session: Database session
+        organization_id: Organization UUID (tenant)
         client_id: Client UUID
 
     Returns:
         Final workflow state with strategy and execution plans
     """
-    logger.info("starting_strategy_workflow", client_id=str(client_id))
+    logger.info(
+        "starting_strategy_workflow",
+        organization_id=str(organization_id),
+        client_id=str(client_id),
+    )
 
     # Get client info
-    client = await get_client(session, client_id)
+    client = await get_client(session, organization_id, client_id)
     if not client:
         raise ValueError(f"Client not found: {client_id}")
 
-    workflow = StrategyWorkflow(session)
+    workflow = StrategyWorkflow(session, organization_id)
     graph = workflow.build_graph()
 
     initial_state: StrategyState = {
+        "organization_id": str(organization_id),
         "client_id": str(client_id),
         "domain": client.domain,
         "company_name": client.name,

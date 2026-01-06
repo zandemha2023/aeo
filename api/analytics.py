@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.auth import Auth, CurrentOrg
 from api.deps import get_session
 from db.queries import get_client, get_latest_intelligence
 from workflows.analytics import (
@@ -69,6 +70,7 @@ class ReportSummary(BaseModel):
 async def generate_report(
     client_id: UUID,
     request: GenerateReportRequest,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """
@@ -77,18 +79,20 @@ async def generate_report(
     Runs the analytics workflow to analyze performance data and generate
     a comprehensive report.
     """
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
     logger.info(
         "generating_report",
         client_id=str(client_id),
+        organization_id=str(auth.organization_id),
         report_type=request.report_type,
     )
 
     result = await run_analytics_workflow(
         session,
+        auth.organization_id,
         client_id,
         client_name=client.name,
         domain=client.domain,
@@ -108,6 +112,7 @@ async def generate_report(
 async def run_technical_audit(
     client_id: UUID,
     request: TechnicalAuditRequest,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """
@@ -115,18 +120,20 @@ async def run_technical_audit(
 
     Analyzes robots.txt, sitemap, and technical SEO factors for AI visibility.
     """
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
     logger.info(
         "running_technical_audit",
         client_id=str(client_id),
+        organization_id=str(auth.organization_id),
         domain=request.domain,
     )
 
     result = await run_technical_audit_workflow(
         session,
+        auth.organization_id,
         client_id,
         domain=request.domain,
         robots_txt=request.robots_txt,
@@ -151,10 +158,11 @@ async def run_technical_audit(
 @router.get("/{client_id}/reports")
 async def get_reports(
     client_id: UUID,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Get all reports for a client."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
@@ -164,6 +172,7 @@ async def get_reports(
     for report_type in ["weekly", "monthly", "quarterly"]:
         intel = await get_latest_intelligence(
             session,
+            auth.organization_id,
             client_id,
             f"client_report_{report_type}",
         )
@@ -181,10 +190,11 @@ async def get_reports(
 async def get_report(
     client_id: UUID,
     report_type: str,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Get a specific report type."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
@@ -193,6 +203,7 @@ async def get_report(
 
     intel = await get_latest_intelligence(
         session,
+        auth.organization_id,
         client_id,
         f"client_report_{report_type}",
     )
@@ -210,15 +221,17 @@ async def get_report(
 async def get_report_as_markdown(
     client_id: UUID,
     report_type: str,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Get a report formatted as markdown."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
     intel = await get_latest_intelligence(
         session,
+        auth.organization_id,
         client_id,
         f"client_report_{report_type}",
     )
@@ -288,15 +301,17 @@ async def get_report_as_markdown(
 @router.get("/{client_id}/analysis")
 async def get_performance_analysis(
     client_id: UUID,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Get the latest performance analysis."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
     intel = await get_latest_intelligence(
         session,
+        auth.organization_id,
         client_id,
         "performance_analysis",
     )
@@ -313,15 +328,17 @@ async def get_performance_analysis(
 @router.get("/{client_id}/technical-audit")
 async def get_technical_audit(
     client_id: UUID,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Get the latest technical audit results."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
     intel = await get_latest_intelligence(
         session,
+        auth.organization_id,
         client_id,
         "full_technical_audit",
     )
@@ -338,15 +355,17 @@ async def get_technical_audit(
 @router.get("/{client_id}/technical-audit/recommendations")
 async def get_technical_recommendations(
     client_id: UUID,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Get prioritized technical recommendations."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
     intel = await get_latest_intelligence(
         session,
+        auth.organization_id,
         client_id,
         "full_technical_audit",
     )
@@ -365,15 +384,17 @@ async def get_technical_recommendations(
 @router.get("/{client_id}/schema-audit")
 async def get_schema_audit(
     client_id: UUID,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Get the latest schema audit results."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
     intel = await get_latest_intelligence(
         session,
+        auth.organization_id,
         client_id,
         "schema_audit",
     )
@@ -390,6 +411,7 @@ async def get_schema_audit(
 @router.get("/{client_id}/dashboard")
 async def get_dashboard_data(
     client_id: UUID,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """
@@ -397,7 +419,7 @@ async def get_dashboard_data(
 
     Combines key metrics from various sources for dashboard display.
     """
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
@@ -413,6 +435,7 @@ async def get_dashboard_data(
     # Get performance report
     perf_intel = await get_latest_intelligence(
         session,
+        auth.organization_id,
         client_id,
         "performance_report",
     )
@@ -424,6 +447,7 @@ async def get_dashboard_data(
     # Get analysis
     analysis_intel = await get_latest_intelligence(
         session,
+        auth.organization_id,
         client_id,
         "performance_analysis",
     )
@@ -435,6 +459,7 @@ async def get_dashboard_data(
     for report_type in ["weekly", "monthly"]:
         report_intel = await get_latest_intelligence(
             session,
+            auth.organization_id,
             client_id,
             f"client_report_{report_type}",
         )
