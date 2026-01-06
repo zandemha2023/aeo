@@ -687,3 +687,28 @@ async def get_performance_history(
         .order_by(PerformanceSnapshot.snapshot_date.asc())
     )
     return list(result.scalars().all())
+
+
+# Alias for backward compatibility
+async def record_llm_usage(
+    session: AsyncSession,
+    organization_id: UUID,
+    agent_name: str,
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    cost_usd: Decimal,
+    metadata: dict | None = None,
+) -> LLMUsage:
+    """Record LLM usage (alias for log_llm_usage with simplified signature)."""
+    return await log_llm_usage(
+        session=session,
+        organization_id=organization_id,
+        agent=agent_name,
+        provider="anthropic",
+        model=model,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cost_usd=cost_usd,
+        workflow=metadata.get("workflow") if metadata else None,
+    )
