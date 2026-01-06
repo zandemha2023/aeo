@@ -23,6 +23,7 @@ from api.monitoring import router as monitoring_router
 from api.strategy import router as strategy_router
 from api.content import router as content_router
 from api.analytics import router as analytics_router
+from api.jobs import router as jobs_router
 from api.middleware import RateLimitMiddleware, RequestLoggingMiddleware
 from config import get_settings
 
@@ -79,6 +80,7 @@ app.include_router(monitoring_router, prefix="/api/monitoring", tags=["monitorin
 app.include_router(strategy_router, prefix="/api/strategy", tags=["strategy"])
 app.include_router(content_router, prefix="/api/content", tags=["content"])
 app.include_router(analytics_router, prefix="/api/analytics", tags=["analytics"])
+app.include_router(jobs_router, prefix="/api/jobs", tags=["jobs"])
 
 
 @app.middleware("http")

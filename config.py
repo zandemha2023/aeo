@@ -41,9 +41,15 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = True
     default_rate_limit_rpm: int = 60  # requests per minute
 
+    # Redis (for background jobs and rate limiting)
+    redis_url: str = "redis://localhost:6379"
+    redis_db: int = 0
+
     # Worker
     worker_concurrency: int = 4
     monitoring_interval_hours: int = 4
+    job_timeout_seconds: int = 600  # 10 minutes
+    job_max_retries: int = 3
 
     @property
     def is_production(self) -> bool:
