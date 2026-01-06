@@ -7,7 +7,9 @@ from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.auth import Auth, CurrentOrg
 from api.deps import get_session
+from db.models import Organization
 from db.queries import (
     create_client,
     get_client,
@@ -52,7 +54,8 @@ class OnboardingResponse(BaseModel):
 @router.post("/onboard", response_model=OnboardingResponse)
 async def onboard_client(
     request: ClientCreate,
-    background_tasks: BackgroundTasks,
+    auth: Auth,
+    org: CurrentOrg,
     session: AsyncSession = Depends(get_session),
 ):
     """
@@ -63,10 +66,14 @@ async def onboard_client(
     2. Runs Cartographer for intelligence gathering
     3. Generates monitoring queries
     """
-    logger.info("onboarding_client", domain=request.domain)
+    logger.info(
+        "onboarding_client",
+        domain=request.domain,
+        organization_id=str(auth.organization_id),
+    )
 
-    # Check if already exists
-    existing = await get_client_by_domain(session, request.domain)
+    # Check if already exists within this organization
+    existing = await get_client_by_domain(session, auth.organization_id, request.domain)
     if existing:
         # Return existing client info
         return OnboardingResponse(
@@ -79,6 +86,7 @@ async def onboard_client(
     # Run onboarding workflow
     result = await run_onboarding_workflow(
         session,
+        auth.organization_id,
         request.domain,
         request.name,
         request.additional_context,
@@ -93,14 +101,19 @@ async def onboard_client(
 
 
 @router.get("/", response_model=list[ClientResponse])
-async def list_clients(session: AsyncSession = Depends(get_session)):
-    """List all active clients."""
-    clients = await list_active_clients(session)
+async def list_clients(
+    auth: Auth,
+    session: AsyncSession = Depends(get_session),
+):
+    """List all active clients for the organization."""
+    clients = await list_active_clients(session, auth.organization_id)
 
     responses = []
     for client in clients:
         # Check if profile exists
-        intel = await get_latest_intelligence(session, client.id, "cartographer")
+        intel = await get_latest_intelligence(
+            session, auth.organization_id, client.id, "cartographer"
+        )
         has_profile = intel is not None
 
         responses.append(
@@ -119,15 +132,18 @@ async def list_clients(session: AsyncSession = Depends(get_session)):
 @router.get("/{client_id}", response_model=ClientResponse)
 async def get_client_by_id(
     client_id: UUID,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Get a specific client."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
 
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    intel = await get_latest_intelligence(session, client.id, "cartographer")
+    intel = await get_latest_intelligence(
+        session, auth.organization_id, client.id, "cartographer"
+    )
 
     return ClientResponse(
         id=str(client.id),
@@ -141,15 +157,16 @@ async def get_client_by_id(
 @router.get("/{client_id}/profile")
 async def get_client_profile(
     client_id: UUID,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Get the full client intelligence profile."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
 
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    kb = ClientKnowledgeBase(session, client_id)
+    kb = ClientKnowledgeBase(session, auth.organization_id, client_id)
     profile = await kb.get_client_profile()
 
     if not profile:
@@ -161,15 +178,16 @@ async def get_client_profile(
 @router.get("/{client_id}/context")
 async def get_client_context(
     client_id: UUID,
+    auth: Auth,
     session: AsyncSession = Depends(get_session),
 ):
     """Get complete client context (all intelligence)."""
-    client = await get_client(session, client_id)
+    client = await get_client(session, auth.organization_id, client_id)
 
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    kb = ClientKnowledgeBase(session, client_id)
+    kb = ClientKnowledgeBase(session, auth.organization_id, client_id)
     context = await kb.get_full_context()
 
     return context

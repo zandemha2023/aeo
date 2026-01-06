@@ -1,7 +1,18 @@
 """
 Database migration utilities.
 
-For initial setup, run: python -m db.migrations create_tables
+DEPRECATED: Use Alembic for migrations instead.
+
+    # Run migrations
+    alembic upgrade head
+
+    # Create new migration
+    alembic revision --autogenerate -m "description"
+
+    # Rollback
+    alembic downgrade -1
+
+This file is kept for backwards compatibility with the check_connection utility.
 """
 
 import asyncio
@@ -10,29 +21,6 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from config import get_settings
-from db.models import Base
-
-
-async def create_tables() -> None:
-    """Create all database tables."""
-    settings = get_settings()
-    engine = create_async_engine(settings.database_url)
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    print("Tables created successfully")
-
-
-async def drop_tables() -> None:
-    """Drop all database tables (use with caution!)."""
-    settings = get_settings()
-    engine = create_async_engine(settings.database_url)
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-
-    print("Tables dropped")
 
 
 async def check_connection() -> bool:
@@ -54,17 +42,17 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) < 2:
-        print("Usage: python -m db.migrations [create_tables|drop_tables|check]")
+        print("Usage:")
+        print("  alembic upgrade head     # Run migrations")
+        print("  alembic downgrade -1     # Rollback one migration")
+        print("  python -m db.migrations check  # Check connection")
         sys.exit(1)
 
     command = sys.argv[1]
 
-    if command == "create_tables":
-        asyncio.run(create_tables())
-    elif command == "drop_tables":
-        asyncio.run(drop_tables())
-    elif command == "check":
+    if command == "check":
         asyncio.run(check_connection())
     else:
         print(f"Unknown command: {command}")
+        print("Use 'alembic' for migration commands")
         sys.exit(1)

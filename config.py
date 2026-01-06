@@ -31,6 +31,16 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
 
+    # Authentication
+    jwt_secret_key: str = "CHANGE-ME-IN-PRODUCTION-use-a-long-random-string"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 30
+    refresh_token_expire_days: int = 7
+
+    # Rate Limiting
+    rate_limit_enabled: bool = True
+    default_rate_limit_rpm: int = 60  # requests per minute
+
     # Worker
     worker_concurrency: int = 4
     monitoring_interval_hours: int = 4
