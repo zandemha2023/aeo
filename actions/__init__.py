@@ -1,6 +1,21 @@
 """Action execution system for AEO."""
 
-# Action system will be implemented in Phase 3-4
-# - Quality gates
-# - Approval workflows
-# - Execution tracking
+from actions.quality_gates import (
+    ContentQualityGates,
+    OptimizationQualityGates,
+    QualityGateReport,
+    GateResult,
+    GateStatus,
+    run_content_quality_gates,
+    run_optimization_quality_gates,
+)
+
+__all__ = [
+    "ContentQualityGates",
+    "OptimizationQualityGates",
+    "QualityGateReport",
+    "GateResult",
+    "GateStatus",
+    "run_content_quality_gates",
+    "run_optimization_quality_gates",
+]
