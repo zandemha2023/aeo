@@ -26,6 +26,9 @@ from api.strategy import router as strategy_router
 from api.content import router as content_router
 from api.analytics import router as analytics_router
 from api.jobs import router as jobs_router
+from api.admin import router as admin_router
+from api.webhooks import router as webhooks_router
+from api.billing import router as billing_router
 from api.middleware import RateLimitMiddleware, RequestLoggingMiddleware
 from config import get_settings
 from observability.logging import configure_logging, bind_contextvars, clear_contextvars
@@ -69,11 +72,105 @@ async def lifespan(app: FastAPI):
     logger.info("aeo_orchestrator_shutting_down")
 
 
+OPENAPI_DESCRIPTION = """
+# AEO Orchestrator API
+
+**Autonomous Answer Engine Optimization Agency**
+
+The AEO Orchestrator is an autonomous system for monitoring and optimizing your brand's
+presence in AI answer engines (ChatGPT, Perplexity, Claude, etc.).
+
+## Features
+
+- **Client Management**: Onboard and manage multiple clients
+- **Monitoring**: Track brand mentions across AI answer engines
+- **Strategy**: Generate optimization strategies based on monitoring data
+- **Content**: Create and optimize content for AI visibility
+- **Analytics**: Comprehensive performance reporting
+
+## Authentication
+
+All API endpoints require authentication via:
+- **JWT Bearer Token**: `Authorization: Bearer <token>`
+- **API Key**: `X-API-Key: <api_key>`
+
+## Rate Limiting
+
+Requests are rate-limited per organization based on your plan:
+- Free: 30 requests/minute
+- Starter: 60 requests/minute
+- Pro: 120 requests/minute
+- Enterprise: 300 requests/minute
+
+## Webhooks
+
+Configure webhooks to receive real-time notifications for:
+- New alerts
+- Monitoring completion
+- Budget warnings
+
+## Support
+
+- Documentation: https://docs.aeo-orchestrator.io
+- Issues: https://github.com/your-org/aeo-orchestrator/issues
+"""
+
+OPENAPI_TAGS = [
+    {
+        "name": "clients",
+        "description": "Client management and onboarding",
+    },
+    {
+        "name": "monitoring",
+        "description": "Brand monitoring across AI answer engines",
+    },
+    {
+        "name": "strategy",
+        "description": "AEO strategy generation and recommendations",
+    },
+    {
+        "name": "content",
+        "description": "Content optimization and generation",
+    },
+    {
+        "name": "analytics",
+        "description": "Performance reporting and analytics",
+    },
+    {
+        "name": "jobs",
+        "description": "Background job management",
+    },
+    {
+        "name": "admin",
+        "description": "Administrative dashboard and organization management",
+    },
+    {
+        "name": "webhooks",
+        "description": "Webhook configuration and delivery logs",
+    },
+    {
+        "name": "billing",
+        "description": "Usage invoicing and budget management",
+    },
+]
+
 app = FastAPI(
     title="AEO Orchestrator",
-    description="Autonomous Answer Engine Optimization Agency",
-    version="0.1.0",
+    description=OPENAPI_DESCRIPTION,
+    version="1.0.0",
     lifespan=lifespan,
+    openapi_tags=OPENAPI_TAGS,
+    license_info={
+        "name": "Proprietary",
+        "url": "https://aeo-orchestrator.io/terms",
+    },
+    contact={
+        "name": "AEO Support",
+        "email": "support@aeo-orchestrator.io",
+    },
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
 )
 
 # Add middleware (order matters - last added = first executed)
@@ -88,6 +185,9 @@ app.include_router(strategy_router, prefix="/api/strategy", tags=["strategy"])
 app.include_router(content_router, prefix="/api/content", tags=["content"])
 app.include_router(analytics_router, prefix="/api/analytics", tags=["analytics"])
 app.include_router(jobs_router, prefix="/api/jobs", tags=["jobs"])
+app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
+app.include_router(webhooks_router, prefix="/api/webhooks", tags=["webhooks"])
+app.include_router(billing_router, prefix="/api/billing", tags=["billing"])
 
 
 @app.middleware("http")

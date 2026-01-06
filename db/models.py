@@ -393,3 +393,92 @@ class PerformanceSnapshot(Base):
     __table_args__ = (
         Index("ix_snapshots_org_client_date", "organization_id", "client_id", "snapshot_date"),
     )
+
+
+# =============================================================================
+# WEBHOOK CONFIGURATION
+# =============================================================================
+
+
+class WebhookEndpoint(Base):
+    """
+    Webhook endpoint configuration for notifications.
+
+    Organizations can configure webhooks to receive notifications
+    about alerts, monitoring results, and system events.
+    """
+
+    __tablename__ = "webhook_endpoints"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Endpoint configuration
+    url = Column(String(2048), nullable=False)
+    secret_hash = Column(String(255))  # Hashed secret for signature verification
+    events = Column(JSONB, default=list)  # List of subscribed event types
+    headers = Column(JSONB, default=dict)  # Additional headers to send
+
+    # Status
+    is_active = Column(Boolean, default=True)
+    last_triggered_at = Column(DateTime)
+    last_success_at = Column(DateTime)
+    last_failure_at = Column(DateTime)
+    consecutive_failures = Column(Integer, default=0)
+
+    # Metadata
+    name = Column(String(255))  # User-provided name
+    description = Column(Text)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_webhooks_org_active", "organization_id", "is_active"),
+    )
+
+
+class WebhookDelivery(Base):
+    """
+    Log of webhook delivery attempts.
+
+    Tracks each delivery attempt for debugging and retry purposes.
+    """
+
+    __tablename__ = "webhook_deliveries"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    webhook_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("webhook_endpoints.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    # Event details
+    event_type = Column(String(100), nullable=False)
+    event_id = Column(String(100), nullable=False)
+    payload = Column(JSONB, nullable=False)
+
+    # Delivery result
+    success = Column(Boolean, nullable=False)
+    status_code = Column(Integer)
+    response_body = Column(Text)
+    error_message = Column(Text)
+    attempts = Column(Integer, default=1)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_webhook_deliveries_webhook_created", "webhook_id", "created_at"),
+    )
