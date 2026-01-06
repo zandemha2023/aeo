@@ -14,6 +14,8 @@ from uuid import UUID
 
 import structlog
 from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi.responses import Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest, REGISTRY
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agents.base import flush_usage_to_db, get_circuit_breaker_status, set_agent_context
@@ -26,7 +28,11 @@ from api.analytics import router as analytics_router
 from api.jobs import router as jobs_router
 from api.middleware import RateLimitMiddleware, RequestLoggingMiddleware
 from config import get_settings
+from observability.logging import configure_logging, bind_contextvars, clear_contextvars
+from observability.metrics import MetricsMiddleware
 
+# Configure structured logging on module load
+configure_logging()
 logger = structlog.get_logger()
 
 
@@ -73,6 +79,7 @@ app = FastAPI(
 # Add middleware (order matters - last added = first executed)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(MetricsMiddleware)
 
 # Include routers
 app.include_router(clients_router, prefix="/api/clients", tags=["clients"])
@@ -132,6 +139,15 @@ async def ready():
     """Readiness check for container orchestration."""
     # TODO: Add actual readiness checks (DB connection, external services)
     return {"status": "ready"}
+
+
+@app.get("/metrics")
+async def metrics():
+    """Prometheus metrics endpoint."""
+    return Response(
+        content=generate_latest(REGISTRY),
+        media_type=CONTENT_TYPE_LATEST,
+    )
 
 
 @app.get("/api/system/circuit-breakers")

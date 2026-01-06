@@ -1,0 +1,150 @@
+version: "3.8"
+
+services:
+  # PostgreSQL database with pgvector extension
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: aeo-db
+    environment:
+      POSTGRES_USER: aeo
+      POSTGRES_PASSWORD: aeo_password
+      POSTGRES_DB: aeo
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aeo -d aeo"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for job queue and rate limiting
+  redis:
+    image: redis:7-alpine
+    container_name: aeo-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # API server
+  api:
+    build:
+      context: .
+      target: final
+    container_name: aeo-api
+    env_file:
+      - .env
+    environment:
+      - APP_ENV=development
+      - DATABASE_URL=postgresql+asyncpg://aeo:aeo_password@db:5432/aeo
+      - DATABASE_SYNC_URL=postgresql://aeo:aeo_password@db:5432/aeo
+      - REDIS_URL=redis://redis:6379
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    volumes:
+      # Mount source for development hot-reload
+      - .:/app:ro
+    command: >
+      python -m uvicorn api.main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+
+  # Background worker
+  worker:
+    build:
+      context: .
+      target: worker
+    container_name: aeo-worker
+    env_file:
+      - .env
+    environment:
+      - APP_ENV=development
+      - DATABASE_URL=postgresql+asyncpg://aeo:aeo_password@db:5432/aeo
+      - DATABASE_SYNC_URL=postgresql://aeo:aeo_password@db:5432/aeo
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app:ro
+
+  # Database migrations (run once)
+  migrations:
+    build:
+      context: .
+      target: final
+    container_name: aeo-migrations
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://aeo:aeo_password@db:5432/aeo
+      - DATABASE_SYNC_URL=postgresql://aeo:aeo_password@db:5432/aeo
+    depends_on:
+      db:
+        condition: service_healthy
+    command: python -m alembic upgrade head
+    profiles:
+      - migrate
+
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: aeo-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    depends_on:
+      - api
+    profiles:
+      - monitoring
+
+  # Grafana for dashboards
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: aeo-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    profiles:
+      - monitoring
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
