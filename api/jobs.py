@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from redis.asyncio import Redis
 
-from api.auth import Auth, get_auth
+from api.auth import Auth
 from config import get_settings
 from jobs.scheduler import (
     cancel_job,
@@ -68,7 +68,7 @@ async def get_redis() -> ArqRedis:
 
 @router.get("/")
 async def list_jobs(
-    auth: Auth = Depends(get_auth),
+    auth: Auth,
 ):
     """
     List all scheduled/pending jobs.
@@ -96,7 +96,7 @@ async def list_jobs(
 @router.get("/{job_id}")
 async def get_job_status(
     job_id: str,
-    auth: Auth = Depends(get_auth),
+    auth: Auth,
 ):
     """
     Get status and result of a specific job.
@@ -129,7 +129,7 @@ async def get_job_status(
 @router.post("/schedule/monitoring")
 async def schedule_monitoring_job(
     request: ScheduleMonitoringRequest,
-    auth: Auth = Depends(get_auth),
+    auth: Auth,
 ):
     """
     Schedule a monitoring job for a specific client.
@@ -177,7 +177,7 @@ async def schedule_monitoring_job(
 @router.post("/schedule/monitoring/all")
 async def schedule_all_monitoring_jobs(
     request: ScheduleAllMonitoringRequest,
-    auth: Auth = Depends(get_auth),
+    auth: Auth,
 ):
     """
     Schedule monitoring for all active clients in the organization.
@@ -216,7 +216,7 @@ async def schedule_all_monitoring_jobs(
 @router.delete("/{job_id}")
 async def cancel_pending_job(
     job_id: str,
-    auth: Auth = Depends(get_auth),
+    auth: Auth,
 ):
     """
     Cancel a pending job.
@@ -251,7 +251,7 @@ async def cancel_pending_job(
 
 @router.get("/health/workers")
 async def worker_health(
-    auth: Auth = Depends(get_auth),
+    auth: Auth,
 ):
     """
     Get health status of background workers.

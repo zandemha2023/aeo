@@ -286,9 +286,9 @@ async def get_budget_status(
     dependencies=[Depends(require_role(["admin", "owner"]))],
 )
 async def update_budget(
+    auth: Auth,
+    org: CurrentOrg,
     budget_usd: float = Query(..., gt=0, le=100000),
-    auth: Auth = Depends(),
-    org: CurrentOrg = Depends(),
     session: AsyncSession = Depends(get_session),
 ):
     """
