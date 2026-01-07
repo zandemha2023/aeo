@@ -8,6 +8,8 @@ Provides:
 - FastAPI dependencies for protected endpoints
 """
 
+import hashlib
+import hmac
 import secrets
 from datetime import datetime, timedelta
 from typing import Annotated
@@ -174,6 +176,17 @@ def decode_token(token: str) -> TokenData:
 # =============================================================================
 
 
+def hash_api_key(api_key: str) -> str:
+    """
+    Hash an API key using SHA256.
+
+    API keys are already high-entropy random strings, so we don't need
+    bcrypt's slow hashing. SHA256 is sufficient and avoids bcrypt's
+    72-byte limit and passlib compatibility issues.
+    """
+    return hashlib.sha256(api_key.encode()).hexdigest()
+
+
 def generate_api_key() -> tuple[str, str, str]:
     """
     Generate a new API key.
@@ -181,20 +194,23 @@ def generate_api_key() -> tuple[str, str, str]:
     Returns:
         Tuple of (full_key, key_prefix, key_hash)
         - full_key: The complete key to give to the user (only shown once)
-        - key_prefix: First 8 chars to identify the key
-        - key_hash: Hash to store in database
+        - key_prefix: First 12 chars to identify the key in logs/UI
+        - key_hash: SHA256 hash to store in database
     """
     # Generate a secure random key
     full_key = f"aeo_{secrets.token_urlsafe(32)}"
     key_prefix = full_key[:12]
-    key_hash = pwd_context.hash(full_key)
+    key_hash = hash_api_key(full_key)
 
     return full_key, key_prefix, key_hash
 
 
 def verify_api_key(api_key: str, key_hash: str) -> bool:
-    """Verify an API key against its hash."""
-    return pwd_context.verify(api_key, key_hash)
+    """
+    Verify an API key against its hash using constant-time comparison.
+    """
+    computed_hash = hash_api_key(api_key)
+    return hmac.compare_digest(computed_hash, key_hash)
 
 
 # =============================================================================
